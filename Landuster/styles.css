@@ -207,3 +207,14 @@ input.menu-input {
 .menu-clear:active {
     background-color: #da9a9a;
 }
+
+.credit {
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    text-align: right;
+    margin: 0;
+    font-size: 2vh;
+    width: 100vw;
+    color: #8bff74;
+}
