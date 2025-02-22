@@ -1,17 +1,75 @@
-let CONTAINER = document.getElementById("tile-container");
-let FLAG_COUNTER = document.getElementById("flag-counter");
+const CONTAINER = document.getElementById("tile-container");
+const FLAG_COUNTER = document.getElementById("flag-counter");
+const TILE_NUM_INPUT = document.getElementById("tiles-num-input");
+const BOMB_RATIO_INPUT = document.getElementById("bomb-ratio-input");
+const INIT_SAFE_INPUT = document.getElementById("safe-tile-ratio-input");
+const GENERATE_BUTTON = document.getElementById("generate");
+const CLEAR_BUTTON = document.getElementById("clear");
 
-let numTilesPerSide = 15;
-let freeTilesStart = 50;
-let maxBombs = Math.floor((numTilesPerSide ** 2) * 0.2);
+const DEFAULT_NUM_TILES = 15;
+const DEFAULT_BOMB_PERCENT = 0.2;
+const DEFAULT_INIT_SAFE_RATIO = 0.2;
+
+let numSafeTilesActivated;
+let numTilesPerSide;
+let bombRatio;
+let initialSafeRatio;
+let freeTilesStart;
+let maxBombs;
 let grid = [];
 let bombGrid = [];
 let startingX;
 let startingY;
 let numFlagsPlaced;
+let gameEnded;
 
-function sleep(delay){
-    return new Promise((resolve) => setTimeout(resolve, delay));
+TILE_NUM_INPUT.addEventListener("blur", () => {
+    numTilesPerSide = parseInt(TILE_NUM_INPUT.value);
+    clampBombInput();
+    updateInitSafeTiles();
+});
+
+BOMB_RATIO_INPUT.addEventListener("blur", clampBombInput);
+
+INIT_SAFE_INPUT.addEventListener("blur", updateInitSafeTiles)
+
+GENERATE_BUTTON.onclick = () => {
+    newGame();
+}
+
+CLEAR_BUTTON.onclick = () => {
+    resetSettings();
+    newGame();
+}
+
+function resetSettings(){
+    numTilesPerSide = DEFAULT_NUM_TILES;
+    bombRatio = DEFAULT_BOMB_PERCENT;
+    initialSafeRatio = DEFAULT_INIT_SAFE_RATIO;
+    maxBombs = Math.floor((numTilesPerSide ** 2) * bombRatio);
+    
+    TILE_NUM_INPUT.value = numTilesPerSide;
+    BOMB_RATIO_INPUT.value = bombRatio;
+    INIT_SAFE_INPUT.value = initialSafeRatio;
+
+    updateInitSafeTiles();
+}
+
+function clampBombInput(){
+    bombRatio = clamp(parseFloat(BOMB_RATIO_INPUT.value), 0, 1);
+    BOMB_RATIO_INPUT.value = bombRatio;
+    maxBombs = Math.min(Math.floor((numTilesPerSide ** 2) * bombRatio), numTilesPerSide ** 2 - 9);
+    updateInitSafeTiles();
+}
+
+function updateInitSafeTiles(){
+    initialSafeRatio = clamp(parseFloat(INIT_SAFE_INPUT.value), 0, 1);
+    INIT_SAFE_INPUT.value = initialSafeRatio;
+    freeTilesStart = Math.max(Math.floor(((numTilesPerSide ** 2) - maxBombs) * initialSafeRatio), 9);
+}
+
+function clamp(x, min, max){
+    return Math.min(Math.max(x, min), max);
 }
 
 function randomPos(){
@@ -41,7 +99,8 @@ function moveBomb(initialX, initialY, blacklist){
     let bombY = randomPos();
     let i = 1;
 
-    while(bombGrid[bombY][bombX] || blacklist.indexOf(`${bombX}-${bombY}`) != -1 || getBombsAround(bombX, bombY) > 3){
+    while(bombGrid[bombY][bombX] || blacklist.indexOf(`${bombX}-${bombY}`) > -1 || getBombsAround(bombX, bombY) > 3){
+
         bombX = randomPos();
         bombY = randomPos();
     }
@@ -51,6 +110,8 @@ function moveBomb(initialX, initialY, blacklist){
 }
 
 function startSpread(){
+    let checkedTiles = [];
+
     function spreadCross(x, y, probability){
         const DIRECTIONS = [
             {x: 0, y: 0},
@@ -80,11 +141,11 @@ function startSpread(){
     function spreadSquare(x, y, probability){
         for(let currentX = x - 1; currentX < x + 2; currentX++){
             for(let currentY = y - 1; currentY < y + 2; currentY++){
-                console.log(1);
                 let rolledChance = Math.random();
                 if(!isValidTile(currentX, currentY) || rolledChance > probability || checkedTiles.includes(`${currentX}-${currentY}`)){
                     continue;
                 }
+
                 if(checkedTiles.length == freeTilesStart){return;}
 
                 checkedTiles.push(`${currentX}-${currentY}`);
@@ -94,8 +155,6 @@ function startSpread(){
             }
         }
     }
-
-    let checkedTiles = [];
 
     //Initial patch
     spreadSquare(startingX, startingY, 1);
@@ -109,7 +168,6 @@ function startSpread(){
         }
     }
 
-    console.log(checkedTiles);
     activateTile(grid[startingY][startingX], startingX, startingY);
 }
 
@@ -134,7 +192,7 @@ function activateTile(tile, x, y){
 
     if(tile.classList.contains("active")){return;} //Tile is already active
 
-    if(startingX == undefined){ //First tile
+    if(!startingX){ //First tile
         startingX = x;
         startingY = y;
         
@@ -155,23 +213,55 @@ function activateTile(tile, x, y){
     tile.classList.add("active");
 
     if(bombGrid[y][x]){ //Is a bomb tile
+        gameEnded = true;
+        
         tile.classList.add("bomb-variant");
         tile.innerHTML = bombGrid[y][x];
 
         //Show game grid
         for(let x = 0; x < numTilesPerSide; x++){
             for(let y = 0; y < numTilesPerSide; y++){
-                activateTile(grid[y][x], x, y);
+                let tileToCheck = grid[y][x];
+                let flag = tileToCheck.getElementsByClassName("flag")[0];
+
+                if(flag && bombGrid[y][x]){ continue; }
+
+                activateTile(tileToCheck, x, y);
             }
         }
     } else { //Is a safe tile
+        numSafeTilesActivated++;
         tile.classList.add(`variant${(x+y)%2 + 2}`);
+
+        if(numSafeTilesActivated == (numTilesPerSide ** 2 - maxBombs) && !gameEnded){ //game won
+            gameEnded = true;
+
+            for(let x = 0; x < numTilesPerSide; x++){
+                for(let y = 0; y < numTilesPerSide; y++){
+                    if(!bombGrid[y][x]){ continue; } //not a bomb
+                    let tileToFlag = grid[y][x];
+
+                    let flag = tileToFlag.getElementsByClassName("flag")[0];
+
+                    if(flag){
+                        flagToggle(tileToFlag, x, y); //remove the flag
+                    }
+
+                    flagToggle(tileToFlag, x, y); //add the flag
+                }
+            }
+
+            return;
+        }
+
         let bombsAround = getBombsAround(x, y);
         if(bombsAround){
             tile.innerHTML = getBombsAround(x, y);
         } else {
             activateSurroundingTiles();
         }
+
+        
     }
 }
 
@@ -197,8 +287,6 @@ function flagToggle(tile, x, y){
 }
 
 function createGrid(){
-    let tileSize = CONTAINER.clientWidth/numTilesPerSide;
-
     for(const row of grid){
         for(const tile of row){
             tile.remove();
@@ -206,28 +294,35 @@ function createGrid(){
     }
 
     grid = [];
+    const tileSize = `${(60/numTilesPerSide)}vh`;
 
     for(let y = 0; y < numTilesPerSide; y++){
         let row = [];
     
         for(let x = 0; x < numTilesPerSide; x++){
+            CONTAINER.style["grid-template-rows"] = "1fr ".repeat(numTilesPerSide);
+            CONTAINER.style["grid-template-columns"] = "1fr ".repeat(numTilesPerSide);
+
             let tile = Object.assign(document.createElement("button"), {id: `tile${x}-${y}`});
             tile.classList.add("tile", `inactive`, `variant${(x + y) % 2}`);
             tile.style["grid-column-start"] = x + 1;
             tile.style["grid-column-end"] = x + 2;
             tile.style["grid-row-start"] = y + 2;
             tile.style["grid-row-end"] = y + 1;
-            tile.style.width = `${tileSize}px`;
-            tile.style.height = `${tileSize}px`;
 
             //Prevent context menu from opening
             tile.addEventListener("contextmenu", (event) => {
                 event.preventDefault();
+
+                if(gameEnded){ return; };
+
                 if(tile.classList.contains("inactive")){
                     flagToggle(tile, x, y);
                 }
             });
             tile.addEventListener("click", (event) => {
+                if(gameEnded){ return; };
+
                 if(event.button == 0 && tile.classList.contains("inactive") && tile.getElementsByClassName("flag").length == 0){
                     activateTile(tile, x, y);
                 }
@@ -262,11 +357,16 @@ function generateGame(){
 }
 
 function newGame(){
+    numSafeTilesActivated = 0;
     numFlagsPlaced = 0;
+    gameEnded = false;
     CONTAINER.style.setProperty("--length", numTilesPerSide);
+    startingX = null;
+    startingY = null;
     generateGame();
     createGrid();
     FLAG_COUNTER.innerText = `🚩:${maxBombs}`;
 }
 
+resetSettings();
 newGame();
